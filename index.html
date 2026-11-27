@@ -142,6 +142,7 @@ home:'<path d="M3 11l9-8 9 8M5 10v10h14V10"/>',
 play:'<path d="M7 4l13 8-13 8z"/>',
 plus:'<path d="M12 5v14M5 12h14"/>',
 x:'<path d="M6 6l12 12M18 6L6 18"/>',
+cavity:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/>',
 torus:'<ellipse cx="12" cy="12" rx="9" ry="5.5"/><ellipse cx="12" cy="12" rx="4" ry="1.6"/>',
 imp:'<path d="M12 15V4M7 9l5-5 5 5M4 20h16"/>',
 img:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="M4 18l5-5 4 4 3-3 4 4"/>',
@@ -481,6 +482,40 @@ function openImage(){const b=modal(`<div class="h">Imagem como textura</div><div
  b.querySelector('#gg').onclick=()=>{const u=b.querySelector('#gu').value.trim();if(!u)return;const im=new Image();im.crossOrigin='anonymous';im.onload=()=>use(im);im.onerror=()=>say('Não foi possível carregar (o servidor precisa permitir CORS).');im.src=u};
  b.querySelector('#gx').onclick=closeModal}
 
+/* ---------- Cavity: clareia arestas salientes e escurece frestas, injetado na textura ---------- */
+function cavEdges(pm,smooth){const em=emap(pm),fn=pm.f.map(f=>faceN(pm,f).normalize()),fc=pm.f.map(f=>cen(pm,f)),t0=smooth?.5:.12,out=[];
+ pm.f.forEach((f,fi)=>f.forEach((a,k)=>{const b=f[(k+1)%f.length],other=(em.get(ek(a,b))||[]).find(i=>i!=fi);let st,dark=false;
+  if(other===undefined)st=.6;else{const th=Math.acos(Math.max(-1,Math.min(1,fn[fi].dot(fn[other]))));if(th<t0)return;dark=((fc[other].x-fc[fi].x)*fn[fi].x+(fc[other].y-fc[fi].y)*fn[fi].y+(fc[other].z-fc[fi].z)*fn[fi].z)>0;st=Math.min(1,(th-t0)/.9)}
+  out.push({fi,k,dark,st})}));return out}
+function cavityBake(o,opt){const x=ensureTex(o),pm=o.userData.pm,W=x.canvas.width;if(pm.f.length>15000)throw new Error('Malha pesada demais ('+pm.f.length+' faces)');
+ const E=cavEdges(pm,!!o.userData.smooth),by=new Map();E.forEach(e=>{if(!by.has(e.fi))by.set(e.fi,[]);by.get(e.fi).push(e)});
+ const mn=[1e9,1e9,1e9],mx=[-1e9,-1e9,-1e9];pm.v.forEach(p=>{for(let k=0;k<3;k++){if(p[k]<mn[k])mn[k]=p[k];if(p[k]>mx[k])mx[k]=p[k]}});
+ const dim=Math.max(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2])||1,wu=opt.w*dim,cc=new THREE.Color(opt.col),hi=`${cc.r*255|0},${cc.g*255|0},${cc.b*255|0}`;
+ by.forEach((es,fi)=>{const f=pm.f[fi],pts=pm.uv[fi].map(p=>[p[0]*W,(1-p[1])*W]),cx=pts.reduce((s,p)=>s+p[0],0)/pts.length,cy=pts.reduce((s,p)=>s+p[1],0)/pts.length;
+  x.save();x.beginPath();pts.forEach((p,i)=>{const dx=p[0]-cx,dy=p[1]-cy,l=Math.hypot(dx,dy)||1,X=p[0]+dx/l*3,Y=p[1]+dy/l*3;i?x.lineTo(X,Y):x.moveTo(X,Y)});x.closePath();x.clip();
+  const bx0=Math.min(...pts.map(p=>p[0]))-6,by0=Math.min(...pts.map(p=>p[1]))-6,bw=Math.max(...pts.map(p=>p[0]))-bx0+6,bh=Math.max(...pts.map(p=>p[1]))-by0+6;
+  es.forEach(e=>{const A=pts[e.k],B=pts[(e.k+1)%pts.length],ex=B[0]-A[0],ey=B[1]-A[1],el=Math.hypot(ex,ey);if(el<1e-3)return;
+   const va=pm.v[f[e.k]],vb=pm.v[f[(e.k+1)%f.length]],l3=Math.hypot(va[0]-vb[0],va[1]-vb[1],va[2]-vb[2])||1,wpx=Math.max(2,wu*el/l3);
+   let nx=-ey/el,ny=ex/el;if(nx*(cx-A[0])+ny*(cy-A[1])<0){nx=-nx;ny=-ny}
+   const al=(e.dark?opt.d:opt.a)*e.st;if(al<.01)return;const col=e.dark?'0,0,0':hi,g=x.createLinearGradient(A[0],A[1],A[0]+nx*wpx,A[1]+ny*wpx);
+   g.addColorStop(0,`rgba(${col},${al})`);g.addColorStop(.4,`rgba(${col},${al*.45})`);g.addColorStop(1,`rgba(${col},0)`);x.fillStyle=g;x.fillRect(bx0,by0,bw,bh)});
+  x.restore()});
+ o.userData.tex.needsUpdate=true;return E.length}
+function cavCmd(list){const c={bs:list,u(){if(!this.bs)return;this.as=this.bs.map(({o})=>{const x=o.userData.cx,W=x.canvas.width;return x.getImageData(0,0,W,W)});this.bs.forEach(({o,b})=>{const x=o.userData.cx;if(x&&b.width==x.canvas.width){x.putImageData(b,0,0);o.userData.tex.needsUpdate=true}})},
+  r(){if(!this.bs||!this.as)return;this.as.forEach((d,i)=>{const o=this.bs[i].o,x=o.userData.cx;if(x&&d.width==x.canvas.width){x.putImageData(d,0,0);o.userData.tex.needsUpdate=true}})}};push(c);PC.push(c);if(PC.length>8){const d=PC.shift();d.bs=null;d.as=null}}
+const CV={w:6,a:70,d:35,col:'#ffffff',all:false};
+function openCavity(){if(!S.sel){toast('Selecione um objeto primeiro');return}
+ const b=modal(`<div class="h">Cavity</div><div class="note">Clareia as arestas salientes e escurece as frestas, como o modo Cavity do Blender. Fica "injetado" na textura do modelo e vai junto no GLB. Para remover, use Desfazer.</div>
+ <div class="f">Largura<input type="range" id="cw" min="1" max="20" value="${CV.w}"></div><div class="f">Brilho<input type="range" id="ca" min="0" max="100" value="${CV.a}"></div><div class="f">Fendas<input type="range" id="cd" min="0" max="100" value="${CV.d}"></div><div class="f">Cor<button class="csw" id="cc" style="background:${CV.col}"></button></div>
+ <div class="row"><button class="chip ${CV.all?'':'on'}" id="c1">Só este objeto</button><button class="chip ${CV.all?'on':''}" id="c2">Todos os objetos</button></div><div class="note" id="cn"></div><div class="row"><button class="bt" id="cx">Fechar</button><button class="bt ac" id="ci">Injetar cavity</button></div>`);
+ const q=x=>b.querySelector(x);[['#cw','w'],['#ca','a'],['#cd','d']].forEach(([id,k])=>q(id).oninput=e=>{CV[k]=+e.target.value});
+ q('#cc').onclick=()=>pickColor(CV.col,x=>{CV.col=x},()=>openCavity());
+ const sc=all=>{CV.all=all;q('#c1').classList.toggle('on',!all);q('#c2').classList.toggle('on',all)};q('#c1').onclick=()=>sc(false);q('#c2').onclick=()=>sc(true);
+ q('#cx').onclick=closeModal;
+ q('#ci').onclick=()=>{q('#cn').textContent='Injetando...';setTimeout(()=>{try{const ts=CV.all?root.children.slice():[S.sel],list=[];let n=0;
+   ts.forEach(o=>{const x=ensureTex(o),W=x.canvas.width;list.push({o,b:x.getImageData(0,0,W,W)});n+=cavityBake(o,{w:CV.w/100,a:CV.a/100,d:CV.d/100,col:CV.col})});
+   cavCmd(list);closeModal();toast(n?'Cavity injetado ('+n+' arestas)':'Nenhuma aresta marcada: o modelo é liso demais (tente Suave desligado)')}catch(e){q('#cn').textContent='Erro: '+((e&&e.message)||e)}},40)}}
+
 /* ---------- snapshots e arraste do gizmo ---------- */
 function snap(){return S.mode=='edit'?{pm:cl(S.sel.userData.pm)}:{p:S.sel.position.clone(),q:S.sel.quaternion.clone(),s:S.sel.scale.clone()}}
 function restore(m,sn){if(sn.pm)setPM(m,sn.pm);else{m.position.copy(sn.p);m.quaternion.copy(sn.q);m.scale.copy(sn.s)}}
@@ -585,7 +620,7 @@ function renderCtx(){const c=$('#ctx');c.innerHTML='';c.style.display=S.mode=='s
  const add=(l,i,f,on)=>{const b=ib(l,i,f);if(on)b.classList.add('on');c.appendChild(b)},sp=()=>{const d=document.createElement('div');d.className='sep';c.appendChild(d)};
  const matBtn=()=>add('Material','mat',()=>{S.sheet=!S.sheet;renderCtx();renderSheet()},S.sheet);
  if(S.mode=='obj'){[['Cubo','cube'],['Esfera','sphere'],['Cilindro','cylinder'],['Cone','cone'],['Placa','plane'],['Barril','barrel'],['Torus','torus']].forEach(([l,k])=>add(l,k,()=>addObj(k)));sp();
-  add('Importar','imp',openImport);add('Duplicar','dup',dupObj);add('Excluir','del',delObj);matBtn();add('Suave','smooth',toggleSmooth,S.sel&&S.sel.userData.smooth);add('Grade','wire',toggleWire,S.sel&&S.sel.userData.wire)}
+  add('Importar','imp',openImport);add('Duplicar','dup',dupObj);add('Excluir','del',delObj);matBtn();add('Cavity','cavity',openCavity);add('Suave','smooth',toggleSmooth,S.sel&&S.sel.userData.smooth);add('Grade','wire',toggleWire,S.sel&&S.sel.userData.wire)}
  else if(S.mode=='edit'){const g=document.createElement('div');g.className='sg';
   [['v','Vértice'],['e','Aresta'],['f','Face']].forEach(([k,l])=>{const b=document.createElement('button');b.textContent=l;if(S.sub==k)b.className='on';b.onclick=()=>{S.sub=k;renderCtx()};g.appendChild(b)});c.appendChild(g);sp();
   add('Somar','multi',()=>{S.multi=!S.multi;renderCtx()},S.multi);add('Tudo','all',selAll);add('Laço','loop',selLoop);sp();
@@ -596,7 +631,7 @@ function renderCtx(){const c=$('#ctx');c.innerHTML='';c.style.display=S.mode=='s
   const cb=document.createElement('button');cb.className='sw';cb.style.background='conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)';cb.title='Seletor de cor';cb.onclick=()=>pickColor(S.sc,x=>{S.sc=x;S.useImg=false},renderCtx);c.appendChild(cb);sp();
   const rg=(l,k,mn,mx)=>{const e=document.createElement('label');e.className='sl';e.innerHTML=l+'<input type="range" min="'+mn+'" max="'+mx+'" value="'+S[k]+'">';e.querySelector('input').oninput=ev=>{S[k]=+ev.target.value};c.appendChild(e)};
   rg('Tamanho','sz',2,40);if(S.pt=='brush'||S.pt=='erase'){rg('Opacidade','op',5,100);rg('Dureza','hd',0,100)}sp();
-  add('Imagem','img',openImage,S.useImg);add('Preencher','bucket',fillAll);add('Limpar','del',clearPaint)}}
+  add('Cavity','cavity',openCavity);add('Imagem','img',openImage,S.useImg);add('Preencher','bucket',fillAll);add('Limpar','del',clearPaint)}}
 
 /* painel de transformação numérica */
 const TR=[['Pos',(o,k)=>o.position[k],(o,k,v)=>o.position[k]=v],['Rot',(o,k)=>THREE.MathUtils.radToDeg(o.rotation[k]),(o,k,v)=>o.rotation[k]=THREE.MathUtils.degToRad(v)],['Esc',(o,k)=>o.scale[k],(o,k,v)=>o.scale[k]=v]],INP=[];
@@ -749,15 +784,4 @@ addEventListener('keydown',e=>{if(/INPUT/.test(e.target.tagName))return;const k=
 function loop(){requestAnimationFrame(loop);updCam();updG();
  if(S.sel){OV.matrix.copy(S.sel.matrixWorld);OV.matrixWorldNeedsUpdate=true;scaleDots()}
  root.children.forEach(o=>{if(o.userData.dirty){o.userData.tex.needsUpdate=true;o.userData.dirty=false}});
- if(S.sel&&S.mode!='edit'&&$('#prop').classList.contains('open'))TR.forEach((t,r)=>[...'xyz'].forEach((k,j)=>{const i=INP[r][j];if(document.activeElement!==i){const v=(+t[1](S.sel,k)).toFixed(2);if(i.value!==v)i.value=v}}));
- fxT.value=performance.now()/1000%3600;R.render(scene,cam)}
-if(innerHeight>520)$('#prop').classList.add('open');
-renderCtx();ui();loop();
-(async()=>{let ok=true;try{await DB.open()}catch(e){ok=false}
- if(!ok){toast('Salvamento automático indisponível neste navegador');newScene();cur={id:'tmp',name:'Meu place'};ui();return}
- let list=[];try{list=await DB.all()}catch(e){}
- if(!list.length){$('#home').classList.add('on');$('#home').innerHTML='<div class="hh"><h1>Preparando seus places de exemplo...</h1></div>';await seed()}
- $('#home').classList.add('on');renderHome()})();
-</script>
-</body>
-</html>
+ if(S.sel&&S.mode!='edit'&&$('#prop').classList.contains('open'))TR.forEach((t,r)=>[...'xyz'].forEach((k,j)=>{const i=INP[r][j];if(document.active
